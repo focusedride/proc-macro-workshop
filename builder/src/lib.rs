@@ -1,5 +1,7 @@
 use proc_macro::TokenStream;
 use syn::{parse_macro_input, Data, DeriveInput, Fields, __private::ToTokens};
+use quote::quote;
+use syn::{parse_macro_input, DeriveInput};
 
 #[proc_macro_derive(Builder)]
 pub fn derive(input: TokenStream) -> TokenStream {
@@ -13,6 +15,22 @@ pub fn derive(input: TokenStream) -> TokenStream {
             Fields::Named(ref fields) => {
                 for f in fields.named.iter() {
                     println!("{:?}{:?}", f.ident, f.to_token_stream());
+    let expanded = quote! {
+        pub struct CommandBuilder {
+            executable: Option<String>,
+            args: Option<Vec<String>>,
+            env: Option<Vec<String>>,
+            current_dir: Option<String>,
+        }
+
+
+        impl Command {
+            pub fn builder() -> CommandBuilder {
+                CommandBuilder {
+                    executable: None,
+                    args: None,
+                    env: None,
+                    current_dir: None,
                 }
             }
             _ => println!("else"),
@@ -25,6 +43,9 @@ pub fn derive(input: TokenStream) -> TokenStream {
         input.generics.to_token_stream(),
         input.ident.to_token_stream()
     );
+        }
 
-    TokenStream::new()
+    };
+
+    TokenStream::from(expanded)
 }
