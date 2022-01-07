@@ -95,8 +95,6 @@ impl MacroBuilder {
                 }
 
                 pub fn build(&mut self) -> Result<#name, Box<dyn std::error::Error>> {
-                    let e: Box<dyn std::error::Error> = String::from("test").into();
-
                     Ok(#name {
                         #(#build_fields),*
                     })
