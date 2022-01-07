@@ -68,7 +68,7 @@ impl MacroBuilder {
                     self
                 }
 
-                pub fn build(self) -> Result<#name, Box<dyn std::error::Error>> {
+                pub fn build(&mut self) -> Result<#name, Box<dyn std::error::Error>> {
                     let e: Box<dyn std::error::Error> = String::from("test").into();
                         Ok(#name {
                             executable: self.executable.clone().ok_or("test")?,
