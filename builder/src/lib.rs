@@ -57,17 +57,10 @@ impl MacroBuilder {
                         let field_name = f.ident.as_ref().unwrap();
                         let outer_type = p.path.segments.last().unwrap();
                         if &outer_type.ident == "Option" {
-                            // outer_type
-                            //     .arguments
-                            //     .to_token_stream()
-                            //     .into_iter()
-                            //     .filter(|t| t.to_string().len() > 1)
-                            //     .collect();
                             quote! {
                                 #field_name: self.#field_name.clone()
                             }
                         } else {
-                            outer_type.to_token_stream();
                             quote! {
                                 #field_name: self.#field_name.clone().ok_or("test")?
                             }
