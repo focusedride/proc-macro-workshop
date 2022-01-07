@@ -1,5 +1,5 @@
 use proc_macro2::TokenStream;
-use quote::{quote, ToTokens};
+use quote::quote;
 use syn::{parse_macro_input, Data, DeriveInput, Type};
 
 struct MacroBuilder {
@@ -55,15 +55,14 @@ impl MacroBuilder {
                 .map(|f| match &f.ty {
                     Type::Path(p) => {
                         let field_name = f.ident.as_ref().unwrap();
-                        let outer_type = p.path.segments.last().unwrap();
-                        if &outer_type.ident == "Option" {
-                            quote! {
+                        match p.path.segments.last() {
+                            Some(s) if s.ident == "Option" => quote! {
                                 #field_name: self.#field_name.clone()
-                            }
-                        } else {
-                            quote! {
+                            },
+                            Some(_) => quote! {
                                 #field_name: self.#field_name.clone().ok_or("test")?
-                            }
+                            },
+                            None => panic!("bad"),
                         }
                     }
                     _ => unimplemented!("were not there yet"),
