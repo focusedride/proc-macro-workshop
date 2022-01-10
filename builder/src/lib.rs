@@ -1,9 +1,9 @@
 #![feature(extend_one)]
 use proc_macro2::{Span, TokenStream};
 use quote::quote;
-use syn::Visibility;
-use syn::{braced, punctuated::Punctuated, token, Field, Token};
-use syn::{parse_macro_input, Ident, Type};
+use syn::{
+    braced, parse_macro_input, punctuated::Punctuated, token, Field, Ident, Token, Type, Visibility,
+};
 
 #[proc_macro_derive(Builder, attributes(builder))]
 pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -135,9 +135,8 @@ impl EachField for MyAttr {
         if let syn::Lit::Str(fn_name) = &arg.last().unwrap().lit {
             Ok(fn_name)
         } else {
-            let err_msg = r#"expected `builder(each = "...")`"#;
-            let span = arg;
-            Err(syn::Error::new_spanned(span, err_msg))
+            let err_msg = r#"attribute string literall must be really twisted"#;
+            Err(syn::Error::new_spanned(arg, err_msg))
         }
     }
 }
@@ -158,11 +157,10 @@ impl syn::parse::Parse for Mystruct {
             if let Some(attr) = f.attrs.last() {
                 if let Ok(arg) = attr.parse_args_with(MyAttr::parse_separated_nonempty) {
                     if <MyAttr as EachField>::check_ident(&arg) {
-                        if let syn::Lit::Str(fn_name) = &arg.last().unwrap().lit {
-                            setters.extend_one(Mystruct::setter_function_each_variant(
-                                fn_name, field_name,
-                            ));
-                        }
+                        let fn_name = <MyAttr as EachField>::extract_value(&arg)?;
+                        setters.extend_one(Mystruct::setter_function_each_variant(
+                            fn_name, field_name,
+                        ));
                     } else {
                         let err_msg = r#"expected `builder(each = "...")`"#;
                         let span = &attr.parse_meta().unwrap();
