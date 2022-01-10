@@ -37,10 +37,10 @@ impl Mystruct {
         quote! {
             #[derive(Debug)]
             pub struct CommandBuilder {
-                executable: Option<String>,
-                args: Option<Vec<String>>,
-                env: Option<Vec<String>>,
-                current_dir: Option<String>,
+                executable: std::option::Option<String>,
+                args: std::option::Option<Vec<String>>,
+                env: std::option::Option<Vec<String>>,
+                current_dir: std::option::Option<String>,
             }
         }
     }
@@ -54,7 +54,7 @@ impl Mystruct {
             impl CommandBuilder {
                 #(#setters)*
 
-                pub fn build(&mut self) -> Result<#name, Box<dyn std::error::Error>> {
+                pub fn build(&mut self) -> std::result::Result<#name, std::boxed::Box<dyn std::error::Error>> {
                     Ok(#name {
                         #(#build_fields),*
                     })
