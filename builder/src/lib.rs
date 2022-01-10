@@ -62,6 +62,49 @@ impl Mystruct {
             }
         }
     }
+
+    fn setter_function_each_variant(fn_name: &syn::LitStr, field_name: &syn::Ident) -> TokenStream {
+        let fn_name = Ident::new(fn_name.value().as_str(), Span::call_site());
+        quote! {
+            fn #fn_name(&mut self, argument: String) -> &mut Self {
+                if let Some(ref mut v) = self.#field_name {
+                    v.push(argument);
+                }
+                self
+            }
+        }
+    }
+
+    fn setter_function_all_variant(field_name: &syn::Ident) -> TokenStream {
+        let arg_type = match vec!["args", "env"].contains(&field_name.to_string().as_str()) {
+            true => quote! { Vec<String>},
+            false => quote! { String },
+        };
+        quote! {
+            fn #field_name(&mut self, ar: #arg_type) -> &mut Self {
+                self.#field_name = Some(ar);
+                self
+            }
+        }
+    }
+
+    fn builder_function_field(
+        p: &syn::TypePath,
+        field_name: &syn::Ident,
+    ) -> syn::Result<TokenStream> {
+        match p.path.segments.last() {
+            Some(s) if s.ident == "Option" => Ok(quote! {
+                #field_name: self.#field_name.clone()
+            }),
+            Some(_) => {
+                let strname = &field_name.to_string();
+                Ok(quote! {
+                    #field_name: self.#field_name.clone().ok_or(format!("field {} exploded",#strname))?
+                })
+            }
+            None => std::result::Result::Err(::syn::Error::new_spanned(p, "build field error")),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -75,13 +118,29 @@ struct Mystruct {
     fn_build_fields: Vec<proc_macro2::TokenStream>,
 }
 
-fn is_ident_eq_to_each(arg: &MyAttr) -> bool {
-    match arg.last() {
-        Some(v) => v.path.is_ident("each"),
-        None => false,
+type MyAttr = syn::punctuated::Punctuated<syn::MetaNameValue, Token![,]>;
+trait EachField {
+    fn check_ident(arg: &MyAttr) -> bool;
+    fn extract_value(arg: &MyAttr) -> syn::Result<&syn::LitStr>;
+}
+
+impl EachField for MyAttr {
+    fn check_ident(arg: &MyAttr) -> bool {
+        match arg.last() {
+            Some(v) => v.path.is_ident("each"),
+            None => false,
+        }
+    }
+    fn extract_value(arg: &Self) -> syn::Result<&syn::LitStr> {
+        if let syn::Lit::Str(fn_name) = &arg.last().unwrap().lit {
+            Ok(fn_name)
+        } else {
+            let err_msg = r#"expected `builder(each = "...")`"#;
+            let span = arg;
+            Err(syn::Error::new_spanned(span, err_msg))
+        }
     }
 }
-type MyAttr = syn::punctuated::Punctuated<syn::MetaNameValue, Token![,]>;
 
 impl syn::parse::Parse for Mystruct {
     #[allow(dead_code, unused_variables)]
@@ -96,60 +155,29 @@ impl syn::parse::Parse for Mystruct {
         let mut fn_build_fields = vec![];
         for f in fields.iter() {
             let field_name = f.ident.as_ref().unwrap();
-            if f.attrs.len() != 0 {
-                if let Some(attr) = f.attrs.last() {
-                    if let Ok(arg) = attr.parse_args_with(
-                    Punctuated::<syn::MetaNameValue, syn::token::Comma>::parse_separated_nonempty,
-                ) {
-                    if is_ident_eq_to_each(&arg) {
+            if let Some(attr) = f.attrs.last() {
+                if let Ok(arg) = attr.parse_args_with(MyAttr::parse_separated_nonempty) {
+                    if <MyAttr as EachField>::check_ident(&arg) {
                         if let syn::Lit::Str(fn_name) = &arg.last().unwrap().lit {
-                            let fn_name = Ident::new(fn_name.value().as_str(), Span::call_site());
-                            let t = quote! {
-                                fn #fn_name(&mut self, argument: String) -> &mut Self {
-                                    // let a = argument.clone();
-                                    if let Some(ref mut v) = self.#field_name {
-                                        v.push(argument);
-                                    }
-                                    self
-                                }
-                            };
-                            setters.extend_one(t);
+                            setters.extend_one(Mystruct::setter_function_each_variant(
+                                fn_name, field_name,
+                            ));
                         }
                     } else {
-                        return Err(syn::Error::new_spanned(&attr.parse_meta().unwrap(), r#"expected `builder(each = "...")`"#));
+                        let err_msg = r#"expected `builder(each = "...")`"#;
+                        let span = &attr.parse_meta().unwrap();
+                        return Err(syn::Error::new_spanned(span, err_msg));
                     }
-                }
                 }
             } else {
-                let arg_type = if vec!["args", "env"].contains(&field_name.to_string().as_str()) {
-                    quote! { Vec<String>}
-                } else {
-                    quote! { String }
-                };
-                let t = quote! {
-                    fn #field_name(&mut self, ar: #arg_type) -> &mut Self {
-                        self.#field_name = Some(ar);
-                        self
-                    }
-                };
-                setters.extend_one(t);
+                setters.extend_one(Mystruct::setter_function_all_variant(&field_name))
             }
-            let build_fields = match &f.ty {
+            match &f.ty {
                 Type::Path(p) => {
-                    let strname = &field_name.to_string();
-                    match p.path.segments.last() {
-                        Some(s) if s.ident == "Option" => quote! {
-                            #field_name: self.#field_name.clone()
-                        },
-                        Some(_) => quote! {
-                            #field_name: self.#field_name.clone().ok_or(format!("fuck-{}",#strname))?
-                        },
-                        None => panic!("bad"),
-                    }
+                    fn_build_fields.extend_one(Mystruct::builder_function_field(p, field_name)?)
                 }
                 _ => unimplemented!("were not there yet"),
             };
-            fn_build_fields.extend_one(build_fields)
         }
 
         Ok(Mystruct {
