@@ -1,10 +1,4 @@
-#![allow(unused_variables, dead_code, unused_imports)]
-use std::any::Any;
-
-use proc_macro::TokenStream;
 use quote::{quote, ToTokens};
-use syn::Attribute;
-use syn::DeriveInput;
 
 #[proc_macro_derive(CustomDebug, attributes(debug))]
 pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
@@ -22,7 +16,41 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     };
     if let Some(g) = input.generics.type_params().last() {
         let ident = &g.ident;
-        if let Some(q) = input.fields.get_phantom_field() {
+        if let Some(attr) = input.attrs.first() {
+            if let Ok(syn::Meta::List(syn::MetaList { nested, .. })) = attr.parse_meta() {
+                if let Some(syn::NestedMeta::Meta(syn::Meta::NameValue(syn::MetaNameValue {
+                    path,
+                    lit,
+                    ..
+                }))) = nested.first()
+                {
+                    if path.is_ident("bound") {
+                        if let syn::Lit::Str(l) = lit {
+                            if let Ok(syn::WherePredicate::Type(syn::PredicateType {
+                                bounded_ty,
+                                bounds,
+                                ..
+                            })) = syn::parse_str::<syn::WherePredicate>(&l.value())
+                            {
+                                return proc_macro::TokenStream::from(quote! {
+                                    // implementing `T: Trait` is trivial at this point...
+                                    impl<T: Trait> Debug for Wrapper<T>
+                                    where
+                                        #bounded_ty: #bounds,
+                                    { #fnfmt }
+                                });
+                            }
+                        };
+                    }
+                }
+            }
+            proc_macro::TokenStream::from(quote! {
+                impl<T: Trait> Debug for Wrapper<T>
+                where
+                    T::Value: Debug,
+                { #fnfmt }
+            })
+        } else if let Some(_q) = input.fields.get_phantom_field() {
             proc_macro::TokenStream::from(quote! {
                 impl<#ident> std::fmt::Debug for #i<#ident>
                 where
@@ -67,7 +95,7 @@ trait FieldsParser {
 impl FieldsParser for syn::Fields {
     fn get_phantom_field(&self) -> Option<syn::Ident> {
         for f in self.iter() {
-            if let syn::Type::Path(syn::TypePath { qself, path }) = &f.ty {
+            if let syn::Type::Path(syn::TypePath { path, .. }) = &f.ty {
                 if let Some(s) = path.segments.first() {
                     if s.ident.to_string().as_str() == "PhantomData" {
                         return f.ident.clone();
@@ -79,7 +107,7 @@ impl FieldsParser for syn::Fields {
     }
     fn get_associated_type(&self) -> Option<proc_macro2::TokenStream> {
         for f in self.iter() {
-            if let syn::Type::Path(syn::TypePath { qself, path }) = &f.ty {
+            if let syn::Type::Path(syn::TypePath { path, .. }) = &f.ty {
                 if let Some(syn::PathSegment { arguments, .. }) = path.segments.first() {
                     if let syn::PathArguments::AngleBracketed(
                         syn::AngleBracketedGenericArguments { args, .. },
