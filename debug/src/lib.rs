@@ -15,6 +15,11 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         proc_macro2::Span::call_site(),
     );
     let b = input.fields.build_debug_struct_fields();
+    let fnfmt = quote! {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct(#u) #b .finish()
+        }
+    };
     if let Some(g) = input.generics.type_params().last() {
         let ident = &g.ident;
         if let Some(q) = input.fields.get_phantom_field() {
@@ -22,56 +27,44 @@ pub fn derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                 impl<#ident> std::fmt::Debug for #i<#ident>
                 where
                     PhantomData<#ident>: Debug
-                {
-                    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                        f.debug_struct(#u)
-                        #b
-                        .finish()
-                    }
-                }
+                { #fnfmt }
             })
+        } else if let Some(syn::TypeParamBound::Trait(syn::TraitBound { path, .. })) =
+            g.bounds.first()
+        {
+            if let Some(syn::PathSegment {
+                ident: assoctrait, ..
+            }) = path.segments.first()
+            {
+                let assoctype = input.fields.get_associated_type().unwrap();
+                proc_macro::TokenStream::from(quote! {
+                    impl<#ident: #assoctrait> Debug for #i<#ident>
+                    where
+                        #assoctype: std::fmt::Debug
+                    { #fnfmt }
+                })
+            } else {
+                proc_macro::TokenStream::from(quote! {})
+            }
         } else {
             proc_macro::TokenStream::from(quote! {
-                impl<#ident: std::fmt::Debug> std::fmt::Debug for #i<#ident> {
-                    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                        f.debug_struct(#u)
-                        #b
-                        .finish()
-                    }
-                }
+                impl<#ident: std::fmt::Debug> std::fmt::Debug for #i<#ident> { #fnfmt }
             })
         }
     } else {
         proc_macro::TokenStream::from(quote! {
-            impl std::fmt::Debug for #i {
-                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                    f.debug_struct(#u)
-                    #b
-                    .finish()
-                }
-            }
+            impl std::fmt::Debug for #i { #fnfmt }
         })
     }
 }
 
-// type StructGeneric = syn::punctuated::Punctuated<syn::GenericParam, syn::token::Comma>;
-// trait X {
-//     fn x(self) -> u8;
-// }
-// impl X for &syn::Generics {
-//     fn x(self) -> bool {
-//         2
-//     }
-// }
-
 trait FieldsParser {
-    // type PhantomGeneric;
     fn get_phantom_field(&self) -> std::option::Option<syn::Ident>;
+    fn get_associated_type(&self) -> std::option::Option<proc_macro2::TokenStream>;
     fn build_debug_struct_fields(&self) -> proc_macro2::TokenStream;
     fn debug_field_format(f: &syn::Field) -> syn::Result<proc_macro2::TokenStream>;
 }
 impl FieldsParser for syn::Fields {
-    // type PhantomGeneric = syn::AngleBracketedGenericArguments;
     fn get_phantom_field(&self) -> Option<syn::Ident> {
         for f in self.iter() {
             if let syn::Type::Path(syn::TypePath { qself, path }) = &f.ty {
@@ -83,6 +76,38 @@ impl FieldsParser for syn::Fields {
             }
         }
         None
+    }
+    fn get_associated_type(&self) -> Option<proc_macro2::TokenStream> {
+        for f in self.iter() {
+            if let syn::Type::Path(syn::TypePath { qself, path }) = &f.ty {
+                if let Some(syn::PathSegment { arguments, .. }) = path.segments.first() {
+                    if let syn::PathArguments::AngleBracketed(
+                        syn::AngleBracketedGenericArguments { args, .. },
+                    ) = arguments
+                    {
+                        if let Some(syn::GenericArgument::Type(t)) = args.first() {
+                            return Some(t.to_token_stream());
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+    fn build_debug_struct_fields(&self) -> proc_macro2::TokenStream {
+        let fields = self
+            .iter()
+            .map(|f| {
+                let a = syn::LitStr::new(
+                    f.ident.as_ref().unwrap().to_string().as_str(),
+                    proc_macro2::Span::mixed_site(),
+                );
+                let c = Self::debug_field_format(&f).unwrap();
+                let r = quote! { .field(#a, #c) };
+                return r;
+            })
+            .collect::<Vec<_>>();
+        quote! {#(#fields)*}.into()
     }
     fn debug_field_format(f: &syn::Field) -> syn::Result<proc_macro2::TokenStream> {
         let field_name = &f.ident;
@@ -98,19 +123,5 @@ impl FieldsParser for syn::Fields {
             }
         }
         Ok(quote! { &self.#field_name })
-    }
-    fn build_debug_struct_fields(&self) -> proc_macro2::TokenStream {
-        let fields = self
-            .iter()
-            .map(|f| {
-                let a = syn::LitStr::new(
-                    f.ident.as_ref().unwrap().to_string().as_str(),
-                    proc_macro2::Span::mixed_site(),
-                );
-                let c = Self::debug_field_format(&f).unwrap();
-                return quote! { .field(#a, #c) };
-            })
-            .collect::<Vec<_>>();
-        quote! {#(#fields)*}.into()
     }
 }
