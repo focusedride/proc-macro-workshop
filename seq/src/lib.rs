@@ -1,24 +1,12 @@
-#![allow(unused_variables, dead_code, unused_imports, unused_parens)]
-
 use std::ops::Deref;
-use std::ops::Range;
 use std::str::FromStr;
 
-use proc_macro::TokenStream;
 use proc_macro2::TokenTree;
 use quote::quote;
-use quote::ToTokens;
-use syn::fold::{fold_expr, Fold};
-use syn::parse::Parser;
-use syn::parse_macro_input;
-use syn::visit::{self, Visit};
-use syn::LitInt;
-use syn::{token, Expr, ExprParen};
-use syn::{File, ItemFn};
 
 #[proc_macro]
-pub fn seq(input: TokenStream) -> TokenStream {
-    parse_macro_input!(input as Seq).build_macro()
+pub fn seq(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    syn::parse_macro_input!(input as Seq).build_macro()
 }
 
 #[derive(Debug)]
@@ -73,14 +61,33 @@ impl IntoRustRange<usize> for syn::ExprRange {
     }
 }
 impl Seq {
-    fn build_macro(&mut self) -> TokenStream {
-        // dbg!(&self.range);
-        let repeated_content = self
-            .range
+    fn build_macro(&mut self) -> proc_macro::TokenStream {
+        let mut found_repetition = false;
+        let expanded = Seq::expand_repetitions(
+            &self.ident,
+            &self.range,
+            self.content.clone(),
+            &mut found_repetition,
+        );
+
+        if found_repetition {
+            quote! { #expanded }.into()
+        } else {
+            let repeated_body = Seq::repeat(self.content.clone(), self.range.clone(), &self.ident);
+            quote! { #(#repeated_body)* }.into()
+        }
+    }
+
+    fn repeat(
+        body: proc_macro2::TokenStream,
+        range: std::ops::Range<usize>,
+        ident: &syn::Ident,
+    ) -> Vec<proc_macro2::TokenStream> {
+        let repeated_body = range
             .clone()
-            .map(|i| Seq::replace_ident(i, self.content.clone(), &self.ident))
+            .map(|i| Seq::replace_ident(i, body.clone(), ident))
             .collect::<Vec<_>>();
-        quote! { #(#repeated_content)* }.into()
+        repeated_body
     }
 
     fn replace_ident(
@@ -91,7 +98,7 @@ impl Seq {
         let mut content = Vec::from_iter(content.clone());
         let mut i = 0;
         while i < content.len() {
-            let replace = match &content[i] {
+            match &content[i] {
                 TokenTree::Ident(matched_ident)
                     if matched_ident.to_string() == ident.to_string() =>
                 {
@@ -104,6 +111,24 @@ impl Seq {
                 _ => false,
             };
 
+            if i + 3 <= content.len() {
+                match &content[i..i + 3] {
+                    [TokenTree::Ident(prefix), TokenTree::Punct(tilde), TokenTree::Ident(matched_ident)]
+                        if tilde.as_char() == '~'
+                            && matched_ident.to_string() == ident.to_string() =>
+                    {
+                        let ident =
+                            proc_macro2::Ident::new(&format!("{}{}", prefix, x), prefix.span());
+                        content.splice(i..i + 3, std::iter::once(TokenTree::Ident(ident)));
+                        i += 1;
+                        continue;
+                    }
+                    _ => {
+                        3; // ignore
+                    }
+                };
+            }
+
             if let TokenTree::Group(group) = &mut content[i] {
                 let original_span = group.span();
                 let body = Seq::replace_ident(x, group.stream(), ident);
@@ -114,6 +139,67 @@ impl Seq {
             i += 1;
         }
 
-        (proc_macro2::TokenStream::from_iter(content).into())
+        proc_macro2::TokenStream::from_iter(content).into()
+    }
+
+    fn expand_repetitions(
+        var: &syn::Ident,
+        range: &std::ops::Range<usize>,
+        body: proc_macro2::TokenStream,
+        found_repetition: &mut bool,
+    ) -> proc_macro2::TokenStream {
+        fn enter_repetition(tokens: &[proc_macro2::TokenTree]) -> Option<proc_macro2::TokenStream> {
+            match &tokens[0] {
+                TokenTree::Punct(punct) if punct.as_char() == '#' => {}
+                _ => return None,
+            }
+            match &tokens[2] {
+                TokenTree::Punct(punct) if punct.as_char() == '*' => {}
+                _ => return None,
+            }
+            match &tokens[1] {
+                TokenTree::Group(group)
+                    if group.delimiter() == proc_macro2::Delimiter::Parenthesis =>
+                {
+                    Some(group.stream())
+                }
+                _ => None,
+            }
+        }
+        let mut tokens = Vec::from_iter(body);
+
+        // Look for `#(...)*`.
+        let mut i = 0;
+        while i < tokens.len() {
+            if let proc_macro2::TokenTree::Group(group) = &mut tokens[i] {
+                let content = Seq::expand_repetitions(var, range, group.stream(), found_repetition);
+                let original_span = group.span();
+                *group = proc_macro2::Group::new(group.delimiter(), content);
+                group.set_span(original_span);
+                i += 1;
+                continue;
+            }
+            if i + 3 > tokens.len() {
+                i += 1;
+                continue;
+            }
+            let template = match enter_repetition(&tokens[i..i + 3]) {
+                Some(template) => template,
+                None => {
+                    i += 1;
+                    continue;
+                }
+            };
+            *found_repetition = true;
+            let mut repeated = Vec::new();
+            for value in range.clone() {
+                repeated.extend(Seq::replace_ident(value, template.clone(), var));
+            }
+            let repeated_len = repeated.len();
+            tokens.splice(i..i + 3, repeated);
+            i += repeated_len;
+        }
+
+        proc_macro2::TokenStream::from_iter(tokens)
     }
 }
