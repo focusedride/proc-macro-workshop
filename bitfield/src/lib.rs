@@ -16,4 +16,6 @@ pub use bitfield_impl::bitfield;
 
 pub trait Specifier {
     const BITS: u8;
+    // const INDEX: u8;
+    // const POSITION: std::ops::Range<usize>;
 }
