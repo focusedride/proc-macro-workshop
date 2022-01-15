@@ -13,3 +13,7 @@
 pub use bitfield_impl::bitfield;
 
 // TODO other things
+
+pub trait Specifier {
+    const BITS: u8;
+}
