@@ -99,12 +99,19 @@ impl VisitMut for LexiographicMatching {
         };
 
         let mut arm_patterns: Vec<String> = vec![];
-
+        let mut counter = 0;
         if i.attrs.iter().any(|a| a.path.is_ident("sorted")) {
             i.attrs.retain(|a| !a.path.is_ident("sorted"));
             for arm in &i.arms {
+                counter += 1;
                 let path = if let Some(path) = extract_match_arm_patterns(arm.clone()) {
                     path
+                } else if let syn::Pat::Wild(x) = &arm.pat {
+                    if counter != i.arms.len() {
+                        self.errors
+                            .push(syn::Error::new_spanned(&x, "unsupported by #[sorted]"));
+                    }
+                    continue;
                 } else {
                     self.errors.push(syn::Error::new_spanned(
                         &arm.pat,
