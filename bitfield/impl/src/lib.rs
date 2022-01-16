@@ -141,6 +141,7 @@ impl Bitfield for syn::ItemStruct {
                         span,
                     ));
 
+                    // std::mem::align_of
                     let mapped_type: syn::Type = match l {
                         1 => syn::parse_str("u8").unwrap(),
                         2 => syn::parse_str("u16").unwrap(),
@@ -153,7 +154,6 @@ impl Bitfield for syn::ItemStruct {
                         span,
                     ));
                     let lr = (section.0 % 8, section.1 % 8);
-                    // BUG invert https://stackoverflow.com/questions/26004263/set-the-i-th-bit-to-zero
                     let getter = quote! {
                         fn #get_i(&self) -> u64 {
                             let chunk = unsafe {
@@ -161,7 +161,6 @@ impl Bitfield for syn::ItemStruct {
                             };
                             let needle = #mapped_type::MAX >> #bl;
                             return ((chunk >> #drre) & (needle)) as u64;
-                            // >> u64::from_str_radix(&format!("{:#010b}", (0b11111111 >> 5 << 3) & 0b010101001).trim_start_matches("0b")[2..=4], 2).unwrap()
                         }
                     };
                     let setter = quote! {
