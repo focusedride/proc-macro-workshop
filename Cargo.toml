@@ -11,8 +11,8 @@ name = "workshop"
 path = "main.rs"
 
 [dependencies]
-bitfield = { path = "bitfield" }
-derive_builder = { path = "builder" }
-derive_debug = { path = "debug" }
-seq = { path = "seq" }
-sorted = { path = "sorted" }
+bitfield = { path = "05-bitfield" }
+derive_builder = { path = "01-builder" }
+derive_debug = { path = "02-debug" }
+seq = { path = "03-seq" }
+sorted = { path = "04-sorted" }

@@ -50,7 +50,7 @@ impl IntoRustRange<usize> for syn::ExprRange {
             }
             0 // BUG: unhandled exception
         };
-        let is_inclusive = if let syn::RangeLimits::HalfOpen(v) = self.limits {
+        let is_inclusive = if let syn::RangeLimits::HalfOpen(_v) = self.limits {
             0
         } else {
             1
